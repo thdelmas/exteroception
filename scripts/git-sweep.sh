@@ -54,6 +54,9 @@ for root in "${roots[@]}"; do
       fi
     elif [ -n "$(git -C "$repo" remote 2>/dev/null)" ]; then
       flags="$flags NO-UPSTREAM"
+    else
+      # exists only on this disk — the most stranded a repo can be
+      flags="$flags NO-REMOTE"
     fi
 
     if [ -n "$flags" ]; then
@@ -62,7 +65,7 @@ for root in "${roots[@]}"; do
       printf '%-45s %-18s %s  (last commit %s)\n' "$repo" "[$branch]" "${flags# }" "$age"
     fi
   done < <(find "$root" -maxdepth "$depth" -name .git \( -type d -o -type f \) 2>/dev/null \
-             -not -path '*/node_modules/*' -not -path '*/.cache/*' | sort)
+             -not -path '*/node_modules/*' -not -path '*/.cache/*' -not -path '*/.nvm/*' | sort)
 done
 
 echo "-- git-sweep: $found repo(s) with deltas / $scanned scanned --"
