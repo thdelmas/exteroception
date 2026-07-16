@@ -24,7 +24,8 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-[ ${#roots[@]} -eq 0 ] && roots=(.)
+defaulted=0
+[ ${#roots[@]} -eq 0 ] && { roots=(.); defaulted=1; }
 
 found=0
 scanned=0
@@ -68,4 +69,9 @@ for root in "${roots[@]}"; do
              -not -path '*/node_modules/*' -not -path '*/.cache/*' -not -path '*/.nvm/*' | sort)
 done
 
-echo "-- git-sweep: $found repo(s) with deltas / $scanned scanned --"
+# A sense must state its field: "0 deltas" from a narrow scan reads as a
+# quiet world. Name the roots, and flag when they were defaulted, not chosen.
+echo "-- git-sweep: $found repo(s) with deltas / $scanned scanned under: $(realpath -m "${roots[@]}" | paste -sd' ') --"
+if [ "$defaulted" -eq 1 ]; then
+  echo "-- WARNING: field defaulted to cwd. If your watched surface is wider (e.g. \$HOME), this sweep proves nothing about it: git-sweep.sh --depth 3 \$HOME --"
+fi
