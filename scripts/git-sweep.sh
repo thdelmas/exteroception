@@ -3,7 +3,14 @@
 #
 # Scans every git repo under the given roots and reports ONLY deltas:
 # dirty trees, stranded (unpushed) commits, behind-upstream, detached
-# heads, missing upstreams. A clean, pushed, tracking repo prints nothing.
+# heads, missing upstreams, and LANDED commits (HEAD moved since the last
+# sweep — work another session finished while this one slept; shows the
+# new subjects). A clean, pushed, tracking, unchanged repo prints nothing.
+#
+# Last-seen HEADs live in ~/.claude/state/git-sweep-seen.tsv (override:
+# GIT_SWEEP_STATE). Updating it is the sense's own memory, not a world
+# mutation; the sweep remains read-only toward the repos. First sight of
+# a repo records a baseline silently.
 #
 # Read-only. No fetch by default (fast, offline-safe): ahead/behind is
 # measured against the last-fetched remote refs. Pass --fetch to refresh
@@ -26,6 +33,10 @@ while [ $# -gt 0 ]; do
 done
 defaulted=0
 [ ${#roots[@]} -eq 0 ] && { roots=(.); defaulted=1; }
+
+state="${GIT_SWEEP_STATE:-$HOME/.claude/state/git-sweep-seen.tsv}"
+mkdir -p "$(dirname "$state")" && touch "$state"
+newstate="$(mktemp)"
 
 found=0
 scanned=0
@@ -60,14 +71,35 @@ for root in "${roots[@]}"; do
       flags="$flags NO-REMOTE"
     fi
 
+    # LANDED: HEAD moved since the last sweep saw this repo
+    landed_log=""
+    head_sha="$(git -C "$repo" rev-parse HEAD 2>/dev/null || true)"
+    if [ -n "$head_sha" ]; then
+      key="$(realpath "$repo")"
+      prev="$(awk -v k="$key" '$1==k{print $2}' "$state" | tail -1)"
+      if [ -n "$prev" ] && [ "$prev" != "$head_sha" ]; then
+        n="$(git -C "$repo" rev-list --count "$prev..HEAD" 2>/dev/null || echo '?')"
+        flags="$flags LANDED:$n"
+        landed_log="$(git -C "$repo" log --format='    + %h %s (%cr)' "$prev..HEAD" 2>/dev/null | head -3)"
+      fi
+      printf '%s %s\n' "$key" "$head_sha" >> "$newstate"
+    fi
+
     if [ -n "$flags" ]; then
       found=$((found + 1))
       age="$(git -C "$repo" log -1 --format=%cr 2>/dev/null || echo 'no commits')"
       printf '%-45s %-18s %s  (last commit %s)\n' "$repo" "[$branch]" "${flags# }" "$age"
+      [ -n "$landed_log" ] && printf '%s\n' "$landed_log"
     fi
   done < <(find "$root" -maxdepth "$depth" -name .git \( -type d -o -type f \) 2>/dev/null \
              -not -path '*/node_modules/*' -not -path '*/.cache/*' -not -path '*/.nvm/*' | sort)
 done
+
+# Persist last-seen HEADs: keep entries for repos outside this scan's field,
+# replace entries for the repos just scanned.
+{ awk 'NR==FNR{seen[$1]=1;next} !($1 in seen)' "$newstate" "$state"; cat "$newstate"; } > "$state.tmp" \
+  && mv "$state.tmp" "$state"
+rm -f "$newstate"
 
 # A sense must state its field: "0 deltas" from a narrow scan reads as a
 # quiet world. Name the roots, and flag when they were defaulted, not chosen.

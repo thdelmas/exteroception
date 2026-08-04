@@ -26,6 +26,7 @@ Keep an explicit, small list of what you actually depend on. Typical surfaces:
 - **Clocks** — deadlines, renewal dates, decision points within the horizon (e.g. 7 days). An expired clock outranks everything else in the brief.
 - **Services** — hosts, daemons, cron jobs, CI that must be alive for your work to mean anything.
 - **Due forecasts** — proprioception's forecast ledger: anything past its resolve-by date gets surfaced for resolution.
+- **Exposure** — new CVEs against what you actually run: actively-exploited advisories (CISA KEV) matched to `~/.claude/security/inventory.txt`, live WordPress core versions, and local dependency vulns (`cve-match` — our own matcher over local advisory mirrors, no third-party engine). `scripts/cve-sweep.sh` captures this in one pass — **diff-only** (new since last sweep) and **fail-closed** (an unreachable feed or a hidden version reports UNKNOWN, never a false "clear"). Triggered by the sweep, never on a timer. Not immune-check: that guards *egress*; this senses *ingress* threat intel.
 
 A surface you never act on is noise — drop it. A surprise that arrived through *no* surface means the list has a hole — add one.
 
