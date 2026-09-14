@@ -18,22 +18,41 @@
 # the merged clock doc (--clocks). That is the leak, named: an obligation
 # whose only record is a file nobody opens at wake.
 #
+# OVERDUE (added 2026-09-14): a clock that passed is not gone until someone
+# disposed of it. The dashboard surfaces (the merged clock doc and the
+# open-loops dashboard, if present) are re-read for rows whose date is in
+# the past, inside --overdue N days, and whose line carries no disposition
+# marker (done/closed/sent/dropped/parked/void/lapsed/adopted/resolved...).
+# Those print as OVERDUE T-n until a session cancels, parks or re-queues
+# them. Origin: a lab recheck lapsed three windows in a row and the sweep
+# never said so, because "past = provenance" also swallowed "past = missed".
+#
+# UNDATED: a row in the clock doc's tables that carries no date token at
+# all ("book in-window", "when back") can never be pulled by date. Listed
+# so it gets one.
+#
 # Read-only. Touches no state, mutates no doc.
 #
-# Usage: clock-sweep.sh [--horizon N] [--clocks FILE] [--all] [ROOT...]
+# Usage: clock-sweep.sh [--horizon N] [--overdue N] [--clocks FILE] [--all] [ROOT...]
 #   --horizon N   days ahead to report (default 30)
+#   --overdue N   days back to re-surface undisposed past rows (default 60; 0 = off)
 #   --clocks FILE merged clock doc to diff against (default: newest
 #                 life/clocks-*.md under the first root)
 #   --all         also print dates already surfaced in the clock doc
 set -uo pipefail
+# Snippets are cut by character, never by byte: a byte-cut can split a
+# multibyte char and the invalid sequence makes a row vanish downstream.
+if locale -a 2>/dev/null | grep -qiE '^C\.utf-?8$'; then export LC_ALL=C.UTF-8; else export LC_ALL=en_US.UTF-8 2>/dev/null || true; fi
 
 horizon=30
+overdue=60
 clocks=""
 show_all=0
 roots=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --horizon) shift; horizon="$1" ;;
+    --overdue) shift; overdue="$1" ;;
     --clocks)  shift; clocks="$1" ;;
     --all)     show_all=1 ;;
     -h|--help) grep '^#' "$0" | cut -c3-; exit 0 ;;
@@ -89,7 +108,7 @@ while IFS=$'\t' read -r tok f ln; do
   # Past = provenance stamp, not a clock. Beyond the horizon = not yet ours.
   [ "$s" -lt "$today_s" ] && continue
   [ "$s" -gt "$limit_s" ] && continue
-  snippet="$(sed -n "${ln}p" "$f" 2>/dev/null | sed 's/^[[:space:]|>*-]*//' | cut -c1-110)"
+  snippet="$(sed -n "${ln}p" "$f" 2>/dev/null | sed 's/^[[:space:]|>*-]*//' | cut -c1-110 | iconv -c -f UTF-8 -t UTF-8)"
   # Surfaced = this DAY appears in the clock doc, in any separator or
   # padding the docs actually use. Matching the raw token would call
   # "~31/08" unsurfaced while the clock doc plainly carries "31-08".
@@ -118,7 +137,74 @@ while IFS=$'\t' read -r iso surf base ln snippet; do
 done < "$due"
 
 echo
-echo "-- clock-sweep: $unsurfaced unsurfaced / $(wc -l < "$due" | tr -d ' ') due within ${horizon}d / $scanned docs scanned --"
+# ---- OVERDUE / UNDATED: the dashboard surfaces, re-read for the past ----
+disposed_rx='✅|~~|CLOSED|DONE|SENT|DROP|PARKED|VOID|lapsed|adopted|resolved|SUPERSEDED|FILED|FIRED|PAID|moot|CLEARED|cancel|ANSWERED|ISSUED|CONFIRMED|happened|retired|dead|delivered|shipped|closed log'
+surfaces=()
+[ -n "$clocks" ] && [ -r "$clocks" ] && surfaces+=("$clocks")
+ol="$(find "${roots[0]}" -maxdepth 3 -name 'open-loops.md' 2>/dev/null | head -1)"
+[ -n "$ol" ] && [ -r "$ol" ] && surfaces+=("$ol")
+if [ "$overdue" -gt 0 ] && [ ${#surfaces[@]} -gt 0 ]; then
+  back_s=$(( today_s - overdue * 86400 ))
+  midnight_s="$(date -d "$(date +%Y-%m-%d)" +%s)"
+  od="$(mktemp)"
+  for f in "${surfaces[@]}"; do
+    # only committed rows count: table rows and list items, above any
+    # closed log; prose and headings in these docs are narrative.
+    stop="$(grep -nE '^## Closed log' "$f" | head -1 | cut -d: -f1)"
+    [ -z "$stop" ] && stop=999999
+    grep -nE "$rx" "$f" 2>/dev/null | while IFS=: read -r ln rest; do
+      [ "$ln" -ge "$stop" ] && continue
+      line="$(sed -n "${ln}p" "$f")"
+      echo "$line" | grep -qE '^[[:space:]]*(\||- |[0-9]+\. )' || continue
+      echo "$line" | grep -qE '^[[:space:]]*\|[[:space:]]*(-|:|Date|Item|When|#)' && continue
+      # a row with a disposition marker is done with; a row that also
+      # carries a FUTURE date has been re-queued and shows up above.
+      echo "$line" | grep -qiE "$disposed_rx" && continue
+      best=""
+      for tok in $(echo "$line" | grep -oE "$rx"); do
+        case "$tok" in
+          [0-9][0-9][0-9][0-9]-*) iso="$tok" ;;
+          *[-/][0-9][0-9][0-9][0-9])
+            d="${tok%%[-/]*}"; r2="${tok#*[-/]}"; m="${r2%%[-/]*}"; y="${r2##*[-/]}"
+            iso="$(printf '%04d-%02d-%02d' "$((10#$y))" "$((10#$m))" "$((10#$d))")" ;;
+          *) d="${tok%%[-/]*}"; m="${tok##*[-/]}"
+             iso="$(printf '%04d-%02d-%02d' "$today_y" "$((10#$m))" "$((10#$d))")" ;;
+        esac
+        s2="$(date -d "$iso" +%s 2>/dev/null)" || continue
+        [ "$s2" -ge "$midnight_s" ] && { best="FUTURE"; break; }
+        [ "$s2" -lt "$back_s" ] && continue
+        # keep the LATEST past date on the row: that is the last window it had
+        if [ -z "$best" ] || [ "$iso" \> "$best" ]; then best="$iso"; fi
+      done
+      [ -z "$best" ] || [ "$best" = "FUTURE" ] && continue
+      snippet="$(echo "$line" | sed 's/^[[:space:]|>*-]*//' | cut -c1-110 | iconv -c -f UTF-8 -t UTF-8)"
+      printf '%s\t%s\t%s\t%s\n' "$best" "${f##*/}" "$ln" "$snippet"
+    done
+  done | sort -u > "$od"
+  n_od=$(wc -l < "$od" | tr -d ' ')
+  if [ "$n_od" -gt 0 ]; then
+    printf '\nOVERDUE, undisposed (past %sd; cancel, park or re-queue each):\n' "$overdue"
+    while IFS=$'\t' read -r iso base ln snippet || [ -n "${iso:-}" ]; do
+      days=$(( ( today_s - $(date -d "$iso" +%s) ) / 86400 ))
+      printf '  T-%-3s %s  %-22s %s\n' "$days" "$iso" "$base:$ln" "$snippet"
+    done < "$od"
+  fi
+  rm -f "$od"
+fi
+# UNDATED: clock-doc table rows with no date token at all.
+n_ud=0
+if [ -n "$clocks" ] && [ -r "$clocks" ]; then
+  ud="$(grep -nE '^\|' "$clocks" | grep -vE '^[0-9]+:\|[[:space:]]*(-|:|Date|Item|When|#)' | grep -vE "$rx" | grep -viE "$disposed_rx" || true)"
+  if [ -n "$ud" ]; then
+    n_ud=$(printf '%s\n' "$ud" | wc -l | tr -d ' ')
+    printf '\nUNDATED clock rows (no date token; the puller cannot see these):\n'
+    printf '%s\n' "$ud" | while IFS=: read -r ln rest; do
+      printf '  %-22s %s\n' "${clocks##*/}:$ln" "$(echo "$rest" | sed 's/^[[:space:]|>*-]*//' | cut -c1-110 | iconv -c -f UTF-8 -t UTF-8)"
+    done
+  fi
+fi
+
+echo "-- clock-sweep: $unsurfaced unsurfaced / $(wc -l < "$due" | tr -d ' ') due within ${horizon}d / ${n_od:-0} overdue (${overdue}d back) / $n_ud undated / $scanned docs scanned --"
 if [ -n "$clocks" ]; then
   echo "-- diffed against: $clocks --"
 else
