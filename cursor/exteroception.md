@@ -31,3 +31,7 @@ An explicit, small list: **working trees** (dirty / stranded pushes / behind —
 - **Bounded** — if the sweep becomes the day's work, prune the list or promote the hot surface to a real monitor.
 - **The absence of an expected event is an event** — silence is a delta when the baseline predicted sound.
 - **Functional, not mystical** — a sensory pass, not a divination ritual.
+
+## Firing marker
+
+Runs in prose leave no trace, and untraced is indistinguishable from dormant. At the start of a prose run record it — `organ-fired.py --mark exteroception "<why>"` (ships with proprioception), or `[organ:exteroception] <why>` as the first output line.

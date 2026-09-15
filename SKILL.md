@@ -64,3 +64,13 @@ Expired clocks first, then stranded work, then landed/missing replies, then stal
 - **Bounded.** The sweep serves the wake. If it becomes the day's work, the surface list is too big — prune it, or promote the hot surface to a real monitor.
 - **The absence of an expected event is an event.** No reply past the horizon, a cron that didn't fire, a repo untouched that should have moved — silence is a delta when the baseline predicted sound.
 - **Functional, not mystical.** State capture and diffing with discipline — a sensory pass, not a divination ritual.
+
+## Firing marker
+
+An organ that leaves no trace is indistinguishable from one that never ran. When this organ's cycle runs in prose — no skill call, no script — record the firing at its start so the body's pulse ([proprioception](https://github.com/thdelmas/proprioception)) can see it:
+
+```
+organ-fired.py --mark exteroception "<one-line why>"
+```
+
+`organ-fired.py` ships with proprioception. Without it, emit `[organ:exteroception] <why>` as the first line of output. A host with tool hooks traces invoked runs on its own; the marker is for the runs it cannot see.
