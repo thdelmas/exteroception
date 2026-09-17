@@ -63,7 +63,11 @@ done
 defaulted=0
 [ ${#roots[@]} -eq 0 ] && { roots=("$HOME/Miam/miam-knowledge-base/docs"); defaulted=1; }
 
-today_s=$(date +%s)
+# Anchor to local MIDNIGHT, not to now: every parsed date is a midnight, so
+# measuring from the wall clock dropped anything due TODAY as "past" and
+# printed tomorrow as T+0 from 00:00:01 on. Day counts round (+12h) so a
+# 23h/25h DST day cannot shift them.
+today_s=$(date -d "$(date +%Y-%m-%d)" +%s)
 today_y=$(date +%Y)
 limit_s=$(( today_s + horizon * 86400 ))
 
@@ -127,7 +131,7 @@ while IFS=$'\t' read -r iso surf base ln snippet; do
   [ "$surf" -eq 0 ] && unsurfaced=$((unsurfaced + 1))
   [ "$surf" -eq 1 ] && [ "$show_all" -eq 0 ] && continue
   if [ "$iso" != "$last" ]; then
-    days=$(( ( $(date -d "$iso" +%s) - today_s ) / 86400 ))
+    days=$(( ( $(date -d "$iso" +%s) - today_s + 43200 ) / 86400 ))
     printf '\n%s  (T+%s)\n' "$iso" "$days"
     last="$iso"
   fi
@@ -185,7 +189,7 @@ if [ "$overdue" -gt 0 ] && [ ${#surfaces[@]} -gt 0 ]; then
   if [ "$n_od" -gt 0 ]; then
     printf '\nOVERDUE, undisposed (past %sd; cancel, park or re-queue each):\n' "$overdue"
     while IFS=$'\t' read -r iso base ln snippet || [ -n "${iso:-}" ]; do
-      days=$(( ( today_s - $(date -d "$iso" +%s) ) / 86400 ))
+      days=$(( ( today_s - $(date -d "$iso" +%s) + 43200 ) / 86400 ))
       printf '  T-%-3s %s  %-22s %s\n' "$days" "$iso" "$base:$ln" "$snippet"
     done < "$od"
   fi
