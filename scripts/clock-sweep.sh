@@ -33,11 +33,13 @@
 #
 # Read-only. Touches no state, mutates no doc.
 #
-# Usage: clock-sweep.sh [--horizon N] [--overdue N] [--clocks FILE] [--all] [ROOT...]
+# Usage: clock-sweep.sh [--horizon N] [--overdue N] [--clocks FILE] [--loops FILE] [--all] [ROOT...]
 #   --horizon N   days ahead to report (default 30)
 #   --overdue N   days back to re-surface undisposed past rows (default 60; 0 = off)
 #   --clocks FILE merged clock doc to diff against (default: newest
 #                 life/clocks-*.md under the first root)
+#   --loops FILE  open-loops dashboard to re-read for overdue rows (default:
+#                 first *-loops.md under the first root; none = skipped)
 #   --all         also print dates already surfaced in the clock doc
 set -uo pipefail
 # Snippets are cut by character, never by byte: a byte-cut can split a
@@ -47,6 +49,7 @@ if locale -a 2>/dev/null | grep -qiE '^C\.utf-?8$'; then export LC_ALL=C.UTF-8; 
 horizon=30
 overdue=60
 clocks=""
+loops=""
 show_all=0
 roots=()
 while [ $# -gt 0 ]; do
@@ -54,6 +57,7 @@ while [ $# -gt 0 ]; do
     --horizon) shift; horizon="$1" ;;
     --overdue) shift; overdue="$1" ;;
     --clocks)  shift; clocks="$1" ;;
+    --loops)   shift; loops="$1" ;;
     --all)     show_all=1 ;;
     -h|--help) grep '^#' "$0" | cut -c3-; exit 0 ;;
     *) roots+=("$1") ;;
@@ -145,8 +149,8 @@ echo
 disposed_rx='✅|~~|CLOSED|DONE|SENT|DROP|PARKED|VOID|lapsed|adopted|resolved|SUPERSEDED|FILED|FIRED|PAID|moot|CLEARED|cancel|ANSWERED|ISSUED|CONFIRMED|happened|retired|dead|delivered|shipped|closed log'
 surfaces=()
 [ -n "$clocks" ] && [ -r "$clocks" ] && surfaces+=("$clocks")
-ol="$(find "${roots[0]}" -maxdepth 3 -name 'open-loops.md' 2>/dev/null | head -1)"
-[ -n "$ol" ] && [ -r "$ol" ] && surfaces+=("$ol")
+[ -z "$loops" ] && loops="$(find "${roots[0]}" -maxdepth 3 -name '*-loops.md' 2>/dev/null | sort | head -1)"
+[ -n "$loops" ] && [ -r "$loops" ] && surfaces+=("$loops")
 if [ "$overdue" -gt 0 ] && [ ${#surfaces[@]} -gt 0 ]; then
   back_s=$(( today_s - overdue * 86400 ))
   midnight_s="$(date -d "$(date +%Y-%m-%d)" +%s)"
